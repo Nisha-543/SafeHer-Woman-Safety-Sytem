@@ -1,0 +1,479 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Safe-Her | Smart Safety Navigation</title>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+
+<style>
+*{box-sizing:border-box;margin:0;padding:0;font-family:Arial,sans-serif}
+body{background:#f8f4fb;color:#30243b}
+header{background:white;padding:18px 6%;display:flex;justify-content:space-between;align-items:center;box-shadow:0 3px 12px #0001}
+.logo{font-size:27px;font-weight:bold;color:#963cba}
+.logo span{color:#e34d91}
+nav a{margin-left:15px;text-decoration:none;color:#51445d;font-size:13px}
+.hero{padding:50px 7%;background:linear-gradient(120deg,#eadbff,#ffe3ef)}
+.hero h1{font-size:35px;margin-bottom:12px}
+.hero h1 span{color:#a03dbd}
+.hero p{line-height:1.8;color:#655a70;max-width:650px}
+.tag{display:inline-block;background:white;color:#9239b8;padding:8px 15px;border-radius:25px;margin-bottom:15px;font-size:12px}
+.container{padding:28px 6%}
+.stats,.features{display:grid;grid-template-columns:repeat(3,1fr);gap:15px;margin-bottom:25px}
+.stat,.panel,.map-panel,.feature{background:white;padding:20px;border-radius:14px;box-shadow:0 3px 15px #0001}
+.stat h2{color:#963cba}
+.stat p,.feature p{font-size:13px;color:#777;margin-top:6px}
+.layout{display:grid;grid-template-columns:330px 1fr;gap:20px}
+.panel{margin-bottom:18px}
+.panel h2,.map-panel h2{font-size:19px;margin-bottom:16px}
+label{display:block;font-size:13px;font-weight:bold;margin:13px 0 7px}
+input,select,textarea{width:100%;padding:12px;border:1px solid #e4d8eb;border-radius:8px;background:#fdfaff;outline:none}
+textarea{height:85px;resize:vertical}
+button{padding:12px;border:0;border-radius:8px;cursor:pointer;font-weight:bold}
+.primary{width:100%;margin-top:15px;background:linear-gradient(90deg,#963cba,#e34d91);color:white}
+.secondary{width:100%;margin-top:9px;background:#f0e4f8;color:#8835ac}
+.sos{width:100%;background:#e83d58;color:white;margin-top:12px;font-size:15px}
+#map{height:450px;width:100%;border-radius:10px;z-index:1}
+.map-info,.status{font-size:12px;color:#777;margin-top:12px;line-height:1.6}
+.warning{background:#fff3d9;color:#805d1d;padding:12px;border-radius:8px;font-size:12px;line-height:1.6;margin-top:12px}
+.route-card{padding:15px;border:1px solid #eaddec;border-radius:10px;margin-top:12px}
+.route-card h3{color:#923bb8;font-size:15px}
+.route-card p{font-size:12px;margin-top:7px;color:#666}
+.route-card button{margin-top:10px;background:#f0e4f8;color:#8739a9}
+.route-card.selected{border:2px solid #9a43bc;background:#fcf7ff}
+.score{color:#19865d;font-weight:bold}
+.feature h3{font-size:15px;margin:10px 0}
+.emoji{font-size:27px}
+footer{background:#292139;color:white;text-align:center;padding:25px;margin-top:35px;font-size:13px;line-height:2}
+@media(max-width:800px){
+nav{display:none}
+.layout{grid-template-columns:1fr}
+.stats,.features{grid-template-columns:1fr}
+.hero h1{font-size:27px}
+#map{height:350px}
+}
+</style>
+</head>
+
+<body>
+
+<header>
+<div class="logo">Safe-<span>Her</span> ♀</div>
+<nav>
+<a href="#home">Home</a>
+<a href="#navigation">Navigation</a>
+<a href="#report">Report</a>
+<a href="#safety">Safety</a>
+</nav>
+</header>
+
+<section class="hero" id="home">
+<div class="tag">YOUR SAFETY, YOUR ROUTE</div>
+<h1>Navigate Smart. <span>Travel Safe.</span></h1>
+<p>Safe-Her helps you compare routes using community safety reports. Because reaching safely matters more than reaching quickly.</p>
+</section>
+
+<main class="container">
+
+<section class="stats">
+<div class="stat"><h2>01</h2><p>Smart Navigation</p></div>
+<div class="stat"><h2>02</h2><p>Safety Analysis</p></div>
+<div class="stat"><h2>03</h2><p>Emergency Support</p></div>
+</section>
+
+<section class="layout" id="navigation">
+
+<div>
+
+<div class="panel">
+<h2>🗺️ Find Your Route</h2>
+
+<label>Starting Location</label>
+<input id="start" placeholder="Enter starting location">
+
+<label>Destination</label>
+<input id="destination" placeholder="Enter destination">
+
+<button class="primary" onclick="findRoutes()">Find Safe Routes →</button>
+<button class="secondary" onclick="useLocation()">📍 Use My Location</button>
+
+<p id="routeStatus" class="status"></p>
+
+<div class="warning">
+Safety scores are based on community reports. No reports does not mean an area is safe.
+</div>
+</div>
+
+<div class="panel" id="safety">
+<h2>🚨 Emergency Assistance</h2>
+<p style="font-size:13px;color:#777">For immediate danger, contact emergency services.</p>
+<button class="sos" onclick="emergencyHelp()">SOS – Emergency Help</button>
+<p class="status">India Emergency Number: 112</p>
+</div>
+
+<div class="panel" id="report">
+<h2>📢 Report Unsafe Area</h2>
+<p style="font-size:12px;color:#777">Tap the map to select a report location.</p>
+
+<label>Latitude</label>
+<input id="reportLat" type="number" step="any" placeholder="Select on map">
+
+<label>Longitude</label>
+<input id="reportLon" type="number" step="any" placeholder="Select on map">
+
+<label>Category</label>
+<select id="category">
+<option value="harassment">Harassment</option>
+<option value="poor_lighting">Poor Lighting</option>
+<option value="isolated_area">Isolated Area</option>
+<option value="other">Other</option>
+</select>
+
+<label>Description</label>
+<textarea id="description" maxlength="500" placeholder="Describe the concern"></textarea>
+
+<button class="primary" onclick="submitReport()">Submit Report</button>
+<p id="reportStatus" class="status"></p>
+</div>
+
+</div>
+
+<div class="map-panel">
+<h2>📍 Live Navigation Map</h2>
+<div id="map"></div>
+<p class="map-info">Map data © OpenStreetMap contributors. Click map to select report location.</p>
+
+<div id="routeList" style="margin-top:20px">
+<h2>Available Routes</h2>
+<p class="status">Enter locations to compare routes.</p>
+</div>
+</div>
+
+</section>
+
+<h2 style="margin:30px 0 18px">Our Safety Features</h2>
+
+<section class="features">
+<div class="feature"><div class="emoji">🛣️</div><h3>Smart Navigation</h3><p>Compare available routes and travel times.</p></div>
+<div class="feature"><div class="emoji">🛡️</div><h3>Safety Analysis</h3><p>Analyze reported safety concerns near routes.</p></div>
+<div class="feature"><div class="emoji">🚨</div><h3>Emergency Support</h3><p>Quick access to emergency assistance.</p></div>
+<div class="feature"><div class="emoji">📢</div><h3>Community Reports</h3><p>Share information about unsafe locations.</p></div>
+<div class="feature"><div class="emoji">📍</div><h3>GPS Location</h3><p>Use device location with permission.</p></div>
+<div class="feature"><div class="emoji">💜</div><h3>Privacy First</h3><p>Reporting does not require your name or phone number.</p></div>
+</section>
+
+</main>
+
+<footer>
+<h2>Safe-Her ♀</h2>
+<p>Your Safety, Your Route.</p>
+<p>Smart Women Safety Navigation Project</p>
+<p>© 2026 Safe-Her</p>
+</footer>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<script>
+
+// INITIALIZE MAP
+
+const map = L.map("map").setView([28.6139,77.2090],12);
+
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{
+attribution:"© OpenStreetMap contributors",
+maxZoom:19
+}).addTo(map);
+
+let routeLayers=[];
+let reportMarkers=[];
+
+// MAP CLICK
+
+map.on("click",function(e){
+document.getElementById("reportLat").value=e.latlng.lat.toFixed(6);
+document.getElementById("reportLon").value=e.latlng.lng.toFixed(6);
+document.getElementById("reportStatus").textContent="Location selected.";
+});
+
+// CURRENT LOCATION
+
+function useLocation(){
+
+if(!navigator.geolocation){
+alert("Location not supported.");
+return;
+}
+
+document.getElementById("routeStatus").textContent="Finding location...";
+
+navigator.geolocation.getCurrentPosition(function(position){
+
+let lat=position.coords.latitude;
+let lon=position.coords.longitude;
+
+document.getElementById("start").value=lat+", "+lon;
+
+map.setView([lat,lon],15);
+
+L.marker([lat,lon]).addTo(map).bindPopup("Your location").openPopup();
+
+document.getElementById("routeStatus").textContent="Location detected.";
+
+},function(){
+document.getElementById("routeStatus").textContent="Location permission denied or unavailable.";
+});
+
+}
+
+// CLEAR ROUTES
+
+function clearRoutes(){
+routeLayers.forEach(layer=>map.removeLayer(layer));
+routeLayers=[];
+}
+
+// FIND ROUTES
+
+async function findRoutes(){
+
+let start=document.getElementById("start").value.trim();
+let destination=document.getElementById("destination").value.trim();
+let status=document.getElementById("routeStatus");
+let list=document.getElementById("routeList");
+
+if(!start || !destination){
+status.textContent="Please enter both locations.";
+return;
+}
+
+clearRoutes();
+list.replaceChildren();
+status.textContent="Searching routes...";
+
+try{
+
+let response=await fetch("/api/route",{
+method:"POST",
+headers:{"Content-Type":"application/json"},
+body:JSON.stringify({start,destination})
+});
+
+let data=await response.json();
+
+if(!response.ok) throw new Error(data.error || "Route search failed.");
+
+displayRoutes(data.routes);
+
+status.textContent="Route analysis completed.";
+
+}catch(error){
+status.textContent="Error: "+error.message;
+}
+
+}
+
+// DISPLAY ROUTES
+
+function displayRoutes(routes){
+
+let list=document.getElementById("routeList");
+
+let heading=document.createElement("h2");
+heading.textContent="Available Routes";
+list.appendChild(heading);
+
+let valid=routes.filter(r=>r.safety_score!==null);
+
+let recommended=valid.length?
+[...valid].sort((a,b)=>b.safety_score-a.safety_score)[0]:null;
+
+routes.forEach(function(route,index){
+
+let card=document.createElement("div");
+card.className="route-card";
+
+let title=document.createElement("h3");
+title.textContent="Route "+route.id;
+card.appendChild(title);
+
+function addText(text,cls=""){
+let p=document.createElement("p");
+p.textContent=text;
+if(cls)p.className=cls;
+card.appendChild(p);
+}
+
+addText("Distance: "+route.distance_km+" km");
+addText("Time: "+route.duration_min+" minutes");
+
+if(route.safety_score===null){
+addText("Safety: Insufficient community data");
+}else{
+addText("Safety score: "+route.safety_score+"/100","score");
+}
+
+addText("Nearby reports: "+route.nearby_reports);
+
+if(recommended && route.id===recommended.id){
+addText("★ Highest score among routes with available reports","score");
+}
+
+let button=document.createElement("button");
+button.textContent="View Route";
+button.onclick=()=>showRoute(route,card);
+card.appendChild(button);
+
+list.appendChild(card);
+
+let layer=L.geoJSON(route.geometry,{
+style:{color:"#9c43bc",weight:4,opacity:0.6}
+}).addTo(map);
+
+routeLayers.push(layer);
+
+if(index===0)showRoute(route,card);
+
+});
+
+let note=document.createElement("p");
+note.className="warning";
+note.textContent="Scores represent reported risks only. A higher score does not guarantee safety.";
+list.appendChild(note);
+
+}
+
+// SELECT ROUTE
+
+function showRoute(route,card){
+
+document.querySelectorAll(".route-card").forEach(
+c=>c.classList.remove("selected")
+);
+
+card.classList.add("selected");
+
+routeLayers.forEach(layer=>layer.setStyle({
+color:"#9c43bc",weight:4,opacity:0.45
+}));
+
+let selected=routeLayers[route.id-1];
+
+if(selected){
+selected.setStyle({color:"#e34d91",weight:7,opacity:1});
+map.fitBounds(selected.getBounds(),{padding:[25,25]});
+}
+
+}
+
+// SUBMIT REPORT
+
+async function submitReport(){
+
+let lat=document.getElementById("reportLat").value;
+let lon=document.getElementById("reportLon").value;
+let category=document.getElementById("category").value;
+let description=document.getElementById("description").value;
+
+let status=document.getElementById("reportStatus");
+
+if(lat==="" || lon===""){
+status.textContent="Select a location on the map.";
+return;
+}
+
+status.textContent="Submitting report...";
+
+try{
+
+let response=await fetch("/api/report",{
+method:"POST",
+headers:{"Content-Type":"application/json"},
+body:JSON.stringify({
+latitude:lat,
+longitude:lon,
+category:category,
+description:description
+})
+});
+
+let data=await response.json();
+
+if(!response.ok)throw new Error(data.error);
+
+status.textContent="Report submitted successfully!";
+
+document.getElementById("description").value="";
+
+loadReports();
+
+}catch(error){
+status.textContent="Error: "+error.message;
+}
+
+}
+
+// LOAD REPORTS
+
+async function loadReports(){
+
+try{
+
+let response=await fetch("/api/reports");
+let data=await response.json();
+
+if(!response.ok)throw new Error("Report loading failed");
+
+reportMarkers.forEach(marker=>map.removeLayer(marker));
+reportMarkers=[];
+
+data.reports.forEach(report=>{
+
+let marker=L.circleMarker(
+[report.latitude,report.longitude],
+{
+radius:7,
+color:"#d92e52",
+fillColor:"#ff5475",
+fillOpacity:0.8
+}
+).addTo(map);
+
+let popup=document.createElement("div");
+let title=document.createElement("strong");
+title.textContent=report.category.replaceAll("_"," ");
+let description=document.createElement("p");
+description.textContent=report.description || "No description";
+
+popup.append(title,description);
+marker.bindPopup(popup);
+
+reportMarkers.push(marker);
+
+});
+
+}catch(error){
+console.error(error);
+}
+
+}
+
+// EMERGENCY HELP
+
+function emergencyHelp(){
+
+if(confirm("Are you in immediate danger? Press OK to open emergency call for 112.")){
+window.location.href="tel:112";
+}
+
+}
+
+// START
+
+loadReports();
+
+</script>
+
+</body>
+</html>
