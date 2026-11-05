@@ -1,40 +1,64 @@
 
+        
+    
 import os
 import math
 import sqlite3
+import logging
 import requests
 
+from contextlib import contextmanager
 from flask import Flask, render_template, request, jsonify
 
-app = Flask(__name__)
+# ==========================================
+# SAFE-HER : WOMEN SAFETY NAVIGATION SYSTEM
+# ==========================================
 
-# ---------------- CONFIGURATION ----------------
+app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 16 * 1024
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATABASE = os.path.join(BASE_DIR, "safety.db")
 
+logging.basicConfig(level=logging.INFO)
+
 HEADERS = {
-    "User-Agent": "SafeHerSafetyNavigation/1.0 (student exhibition project)"
+    "User-Agent": "SafeHerNavigation/1.0 (Educational Project)"
 }
 
-CATEGORIES = {
+# Safety risk weights
+RISK_CATEGORIES = {
     "harassment": 3,
     "poor_lighting": 2,
     "isolated_area": 2,
     "other": 1
 }
 
+# ==========================================
+# 1. DATABASE CONNECTION
+# ==========================================
 
-# ---------------- DATABASE ----------------
-
+@contextmanager
 def get_db():
     connection = sqlite3.connect(DATABASE)
     connection.row_factory = sqlite3.Row
-    return connection
+
+    try:
+        yield connection
+        connection.commit()
+
+    except Exception:
+        connection.rollback()
+        raise
+
+    finally:
+        connection.close()
 
 
-def init_db():
+def initialize_database():
+
     with get_db() as db:
+
         db.execute("""
             CREATE TABLE IF NOT EXISTS reports (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -47,14 +71,17 @@ def init_db():
         """)
 
 
-# ---------------- DISTANCE CALCULATION ----------------
+# ==========================================
+# 2. DISTANCE CALCULATION
+# ==========================================
 
-def distance(lat1, lon1, lat2, lon2):
+def calculate_distance(lat1, lon1, lat2, lon2):
 
-    radius = 6371000
+    earth_radius = 6371000
 
     lat1, lon1, lat2, lon2 = map(
-        math.radians, [lat1, lon1, lat2, lon2]
+        math.radians,
+        [lat1, lon1, lat2, lon2]
     )
 
     dlat = lat2 - lat1
@@ -67,12 +94,15 @@ def distance(lat1, lon1, lat2, lon2):
         * math.sin(dlon / 2) ** 2
     )
 
-    return radius * 2 * math.atan2(
-        math.sqrt(a), math.sqrt(1 - a)
+    return earth_radius * 2 * math.atan2(
+        math.sqrt(a),
+        math.sqrt(1 - a)
     )
 
 
-# ---------------- LOCATION SEARCH ----------------
+# ==========================================
+# 3. LOCATION SEARCH
+# ==========================================
 
 def get_coordinates(place):
 
@@ -90,10 +120,13 @@ def get_coordinates(place):
     )
 
     response.raise_for_status()
+
     results = response.json()
 
     if not results:
-        raise ValueError(f"Location not found: {place}")
+        raise ValueError(
+            f"Location not found: {place}"
+        )
 
     return [
         float(results[0]["lon"]),
@@ -101,28 +134,30 @@ def get_coordinates(place):
     ]
 
 
-# ---------------- SAFETY ANALYSIS ----------------
+# ==========================================
+# 4. SAFETY SCORE ANALYSIS
+# ==========================================
 
-def calculate_safety(route):
+def analyze_route(route):
 
     coordinates = route["geometry"]["coordinates"]
 
-    # Sample route points for analysis
     step = max(1, len(coordinates) // 100)
     sampled_points = coordinates[::step]
 
     with get_db() as db:
-        reports = db.execute(
-            "SELECT * FROM reports"
-        ).fetchall()
 
+        reports = db.execute("""
+            SELECT * FROM reports
+        """).fetchall()
+
+    nearby_reports = []
     risk_score = 0
-    matched_reports = []
 
     for report in reports:
 
         nearest_distance = min(
-            distance(
+            calculate_distance(
                 report["latitude"],
                 report["longitude"],
                 point[1],
@@ -133,58 +168,111 @@ def calculate_safety(route):
 
         if nearest_distance <= 250:
 
-            risk_score += CATEGORIES.get(
+            risk_score += RISK_CATEGORIES.get(
                 report["category"], 1
             )
 
-            matched_reports.append(dict(report))
+            nearby_reports.append(dict(report))
 
-    # No community data means safety cannot be verified
-    if not reports:
+    # No reports means safety is unverified
+    if not nearby_reports:
         safety_score = None
+        safety_status = "Insufficient safety data"
+
     else:
-        safety_score = max(0, 100 - risk_score * 12)
+        safety_score = max(
+            0,
+            100 - (risk_score * 12)
+        )
+
+        if safety_score >= 75:
+            safety_status = "Fewer reported risks"
+
+        elif safety_score >= 40:
+            safety_status = "Moderate reported risks"
+
+        else:
+            safety_status = "Higher reported risks"
 
     return {
         "safety_score": safety_score,
-        "nearby_reports": len(matched_reports),
-        "reports": matched_reports
+        "safety_status": safety_status,
+        "nearby_reports": len(nearby_reports),
+        "reports": nearby_reports
     }
 
 
-# ---------------- HOME PAGE ----------------
+# ==========================================
+# 5. HOME PAGE
+# ==========================================
 
 @app.route("/")
 def home():
+
     return render_template("index.html")
 
 
-@app.route("/health")
-def health():
+# ==========================================
+# 6. ABOUT PAGE
+# ==========================================
+
+@app.route("/about")
+def about():
+
     return jsonify({
-        "status": "running",
-        "application": "Safe-Her"
+        "application": "Safe-Her",
+        "description": (
+            "Smart Women Safety Navigation System"
+        ),
+        "purpose": (
+            "Helping users compare routes using "
+            "community-reported safety information."
+        ),
+        "version": "1.0"
     })
 
 
-# ---------------- ROUTE FINDER ----------------
+# ==========================================
+# 7. APPLICATION HEALTH CHECK
+# ==========================================
+
+@app.route("/health")
+def health():
+
+    return jsonify({
+        "status": "running",
+        "application": "Safe-Her",
+        "database": "connected"
+    })
+
+
+# ==========================================
+# 8. FIND AND COMPARE ROUTES
+# ==========================================
 
 @app.route("/api/route", methods=["POST"])
 def find_routes():
 
     try:
+
         data = request.get_json(silent=True) or {}
 
-        start = data.get("start", "").strip()
-        destination = data.get("destination", "").strip()
+        start = str(data.get("start", "")).strip()
+        destination = str(
+            data.get("destination", "")
+        ).strip()
 
         if not start or not destination:
+
             return jsonify({
-                "error": "Please enter both locations."
+                "success": False,
+                "error": "Enter starting point and destination."
             }), 400
 
         if len(start) > 200 or len(destination) > 200:
+
             return jsonify({
+                "success": False,
                 "error": "Location name is too long."
             }), 400
 
@@ -208,87 +296,131 @@ def find_routes():
         )
 
         response.raise_for_status()
+
         result = response.json()
 
         if result.get("code") != "Ok":
+
             return jsonify({
-                "error": "No route could be found."
+                "success": False,
+                "error": "No route available for these locations."
             }), 404
 
         routes = []
 
         for index, route in enumerate(result["routes"]):
 
-            safety = calculate_safety(route)
+            safety = analyze_route(route)
 
             routes.append({
+
                 "id": index + 1,
+
                 "distance_km": round(
                     route["distance"] / 1000, 2
                 ),
+
                 "duration_min": round(
                     route["duration"] / 60
                 ),
+
                 "safety_score": safety["safety_score"],
+
+                "safety_status": safety["safety_status"],
+
                 "nearby_reports": safety["nearby_reports"],
+
                 "geometry": route["geometry"]
+
             })
 
         return jsonify({
+
             "success": True,
+
             "routes": routes,
+
             "message": (
-                "Safety scores are based on community reports. "
-                "Unreported areas are not guaranteed to be safe."
+                "Safety analysis uses community reports "
+                "within 250 metres of sampled route points. "
+                "Missing reports do not mean a route is safe."
             )
+
         })
 
-    except requests.RequestException:
+    except ValueError as error:
+
         return jsonify({
-            "error": "Map service unavailable. Check your internet."
+            "success": False,
+            "error": str(error)
+        }), 404
+
+    except requests.RequestException:
+
+        app.logger.exception("External map service error")
+
+        return jsonify({
+            "success": False,
+            "error": "Map service unavailable. Check internet connection."
         }), 503
 
-    except ValueError as error:
-        return jsonify({"error": str(error)}), 404
-
     except Exception:
+
         app.logger.exception("Route calculation failed")
+
         return jsonify({
-            "error": "Something went wrong while finding routes."
+            "success": False,
+            "error": "Unexpected server error."
         }), 500
 
 
-# ---------------- REPORT UNSAFE AREA ----------------
+# ==========================================
+# 9. REPORT AN UNSAFE AREA
+# ==========================================
 
 @app.route("/api/report", methods=["POST"])
-def report_area():
+def report_unsafe_area():
 
     data = request.get_json(silent=True) or {}
 
     try:
+
         latitude = float(data.get("latitude"))
         longitude = float(data.get("longitude"))
 
-        category = data.get("category", "").strip()
-        description = data.get("description", "").strip()
+        category = str(
+            data.get("category", "")
+        ).strip()
 
-        if not (-90 <= latitude <= 90):
-            raise ValueError("Invalid latitude.")
+        description = str(
+            data.get("description", "")
+        ).strip()
 
-        if not (-180 <= longitude <= 180):
-            raise ValueError("Invalid longitude.")
+        if not (
+            math.isfinite(latitude)
+            and math.isfinite(longitude)
+            and -90 <= latitude <= 90
+            and -180 <= longitude <= 180
+        ):
 
-        if category not in CATEGORIES:
+            raise ValueError("Invalid coordinates.")
+
+        if category not in RISK_CATEGORIES:
+
             return jsonify({
+                "success": False,
                 "error": "Invalid report category."
             }), 400
 
         if len(description) > 500:
+
             return jsonify({
-                "error": "Description is too long."
+                "success": False,
+                "error": "Description must be under 500 characters."
             }), 400
 
         with get_db() as db:
+
             cursor = db.execute("""
                 INSERT INTO reports
                 (latitude, longitude, category, description)
@@ -303,23 +435,32 @@ def report_area():
             report_id = cursor.lastrowid
 
         return jsonify({
+
             "success": True,
-            "message": "Safety report submitted.",
+
+            "message": "Safety report submitted successfully.",
+
             "report_id": report_id
+
         }), 201
 
     except (ValueError, TypeError):
+
         return jsonify({
-            "error": "Please provide valid coordinates."
+            "success": False,
+            "error": "Please enter valid location coordinates."
         }), 400
 
 
-# ---------------- VIEW SAFETY REPORTS ----------------
+# ==========================================
+# 10. VIEW COMMUNITY SAFETY REPORTS
+# ==========================================
 
 @app.route("/api/reports")
-def view_reports():
+def get_reports():
 
     with get_db() as db:
+
         reports = db.execute("""
             SELECT id, latitude, longitude,
                    category, description, created_at
@@ -329,16 +470,59 @@ def view_reports():
         """).fetchall()
 
     return jsonify({
+
         "success": True,
-        "reports": [dict(report) for report in reports]
+
+        "total_reports": len(reports),
+
+        "reports": [
+            dict(report) for report in reports
+        ]
+
     })
 
 
-# ---------------- START APPLICATION ----------------
+# ==========================================
+# 11. DELETE A SAFETY REPORT
+# ==========================================
 
-init_db()
+@app.route("/api/report/<int:report_id>", methods=["DELETE"])
+def delete_report(report_id):
+
+    return jsonify({
+        "success": False,
+        "error": "Report deletion requires administrator authentication."
+    }), 403
+
+
+# ==========================================
+# 12. ERROR HANDLING
+# ==========================================
+
+@app.errorhandler(404)
+def page_not_found(error):
+
+    return jsonify({
+        "error": "Requested page not found."
+    }), 404
+
+
+@app.errorhandler(500)
+def server_error(error):
+
+    return jsonify({
+        "error": "Internal server error."
+    }), 500
+
+
+# ==========================================
+# 13. INITIALIZE AND RUN APPLICATION
+# ==========================================
+
+initialize_database()
 
 if __name__ == "__main__":
+
     port = int(os.environ.get("PORT", 5000))
 
     app.run(
@@ -346,3 +530,15 @@ if __name__ == "__main__":
         port=port,
         debug=False
     )
+
+
+ 
+
+    
+   
+   
+
+    
+     
+            
+        
